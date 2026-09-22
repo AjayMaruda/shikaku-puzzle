@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shikaku Puzzle</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col items-center py-10 px-4">
+  <div class="w-full max-w-md flex flex-col items-center gap-4">
+    <div class="text-center">
+      <h1 class="text-2xl font-bold text-gray-900">Shikaku Puzzle</h1>
+      <p class="text-xs text-gray-500 mt-1">Divide the grid into rectangles containing one number equal to its area.</p>
+    </div>
+
+    <div class="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-200 shadow-sm text-sm">
+      <label class="flex items-center gap-1 text-xs text-gray-600">
+        W:
+        <input id="boardWidth" type="number" value="6" min="4" max="12" class="w-12 bg-gray-50 border border-gray-300 rounded px-1.5 py-0.5 text-center text-gray-800">
+      </label>
+      <label class="flex items-center gap-1 text-xs text-gray-600">
+        H:
+        <input id="boardHeight" type="number" value="6" min="4" max="12" class="w-12 bg-gray-50 border border-gray-300 rounded px-1.5 py-0.5 text-center text-gray-800">
+      </label>
+      <button id="btnNewGame" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-medium">New</button>
+      <button id="btnReset" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded text-xs font-medium">Reset</button>
+      <button id="btnCheck" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-xs font-medium">Check</button>
+    </div>
+
+    <div class="flex items-center justify-between w-full text-xs text-gray-500 px-1">
+      <span id="statusMsg" class="text-blue-600 font-medium">Click New to play</span>
+      <div class="flex items-center gap-3">
+        <span>Time: <span id="statusTimer" class="font-mono text-gray-700">0s</span></span>
+        <span class="hidden">ID: <span id="statusBoardId">-</span></span>
+      </div>
+    </div>
+
+    <div id="boardContainer" class="p-3 bg-white rounded-lg border border-gray-200 shadow-sm hidden">
+      <div id="board" class="grid gap-1"></div>
+    </div>
+
+    <div id="winBanner" class="hidden w-full bg-emerald-50 border border-emerald-300 text-emerald-800 p-3 rounded-lg text-center">
+      <h2 class="text-base font-bold text-emerald-700">Puzzle Solved!</h2>
+      <p id="winTime" class="text-xs text-emerald-600 mt-0.5"></p>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/game.js?v=7"></script>
+</body>
+</html>

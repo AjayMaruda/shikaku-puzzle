@@ -1,34 +1,44 @@
-﻿"use strict";
 const gameService = require("../services/game.service");
-const { CreateBoardDto, validate: validateBoard } = require("../dtos/CreateBoardDto");
-const { PlayerInputDto, validate: validatePlayer } = require("../dtos/PlayerInputDto");
 
 async function initBoard(req, res, next) {
   try {
-    const dto = new CreateBoardDto(req.body);
-    const errors = validateBoard(dto);
-    if (errors.length) {
-      return res.status(400).json({ success: false, errors });
+    const width = parseInt(req.body.width, 10) || 6;
+    const height = parseInt(req.body.height, 10) || 6;
+
+    if (width < 4 || width > 12 || height < 4 || height > 12) {
+      return res.status(400).json({ success: false, error: "Board dimensions must be between 4 and 12" });
     }
-    const game = await gameService.initBoard(dto.width, dto.height);
+
+    const game = await gameService.initBoard(width, height);
     res.status(201).json({
       success: true,
       boardId: game.boardId,
       width: game.width,
       height: game.height,
-      clues: game.clues,
-      startTime: game.startTime
+      clues: game.clues
     });
   } catch (err) {
     next(err);
   }
 }
 
-async function generateRectangles(req, res, next) {
+async function placeRectangle(req, res, next) {
   try {
-    const { boardId } = req.params;
-    const data = await gameService.generateNewRectangles(boardId);
-    res.json({ success: true, boardId, rectangles: data.rectangles, clues: data.clues });
+    const { x, y, width, height } = req.body;
+    const rect = await gameService.placeRectangle(req.params.boardId, Number(x), Number(y), Number(width), Number(height));
+    req.app.get("io").to(req.params.boardId).emit("rectangle:placed", { rectangle: rect });
+    res.json({ success: true, rectangle: rect });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function removeRectangle(req, res, next) {
+  try {
+    const { boardId, rectangleId } = req.params;
+    await gameService.removeRectangle(boardId, rectangleId);
+    req.app.get("io").to(boardId).emit("rectangle:removed", { rectangleId });
+    res.json({ success: true, rectangleId });
   } catch (err) {
     next(err);
   }
@@ -36,15 +46,8 @@ async function generateRectangles(req, res, next) {
 
 async function selectRectangle(req, res, next) {
   try {
-    const { boardId } = req.params;
-    const dto = new PlayerInputDto(req.body);
-    const errors = validatePlayer(dto);
-    if (errors.length) {
-      return res.status(400).json({ success: false, errors });
-    }
-    const rect = await gameService.selectRectangle(boardId, dto.rectangleId);
-    const io = req.app.get("io");
-    io.to(boardId).emit("rectangle:selected", { boardId, rectangle: rect });
+    const rect = await gameService.selectRectangle(req.params.boardId, req.body.rectangleId);
+    req.app.get("io").to(req.params.boardId).emit("rectangle:selected", { rectangle: rect });
     res.json({ success: true, rectangle: rect });
   } catch (err) {
     next(err);
@@ -53,15 +56,8 @@ async function selectRectangle(req, res, next) {
 
 async function snapAndLock(req, res, next) {
   try {
-    const { boardId } = req.params;
-    const dto = new PlayerInputDto(req.body);
-    const errors = validatePlayer(dto);
-    if (errors.length) {
-      return res.status(400).json({ success: false, errors });
-    }
-    const result = await gameService.snapAndLock(boardId, dto.rectangleId);
-    const io = req.app.get("io");
-    io.to(boardId).emit("rectangle:locked", { boardId, rectangle: result.rectangle });
+    const result = await gameService.snapAndLock(req.params.boardId, req.body.rectangleId);
+    req.app.get("io").to(req.params.boardId).emit("rectangle:locked", { rectangle: result.rectangle });
     res.json({ success: true, rectangle: result.rectangle });
   } catch (err) {
     next(err);
@@ -70,11 +66,9 @@ async function snapAndLock(req, res, next) {
 
 async function checkWin(req, res, next) {
   try {
-    const { boardId } = req.params;
-    const result = await gameService.checkWinCondition(boardId);
+    const result = await gameService.checkWinCondition(req.params.boardId);
     if (result.solved) {
-      const io = req.app.get("io");
-      io.to(boardId).emit("game:won", { boardId, elapsedSeconds: result.elapsedSeconds });
+      req.app.get("io").to(req.params.boardId).emit("game:won", result);
     }
     res.json({ success: true, ...result });
   } catch (err) {
@@ -84,20 +78,9 @@ async function checkWin(req, res, next) {
 
 async function resetGame(req, res, next) {
   try {
-    const { boardId } = req.params;
-    const game = await gameService.resetGame(boardId);
-    const io = req.app.get("io");
-    io.to(boardId).emit("game:reset", {
-      boardId,
-      clues: game.clues,
-      startTime: game.startTime
-    });
-    res.json({
-      success: true,
-      boardId: game.boardId,
-      clues: game.clues,
-      startTime: game.startTime
-    });
+    const game = await gameService.resetGame(req.params.boardId);
+    req.app.get("io").to(req.params.boardId).emit("game:reset", { clues: game.clues });
+    res.json({ success: true, clues: game.clues });
   } catch (err) {
     next(err);
   }
@@ -105,12 +88,20 @@ async function resetGame(req, res, next) {
 
 async function stopTimer(req, res, next) {
   try {
-    const { boardId } = req.params;
-    const result = await gameService.stopTimer(boardId);
+    const result = await gameService.stopTimer(req.params.boardId);
     res.json({ success: true, ...result });
   } catch (err) {
     next(err);
   }
 }
 
-module.exports = { initBoard, generateRectangles, selectRectangle, snapAndLock, checkWin, resetGame, stopTimer };
+module.exports = {
+  initBoard,
+  placeRectangle,
+  removeRectangle,
+  selectRectangle,
+  snapAndLock,
+  checkWin,
+  resetGame,
+  stopTimer
+};
