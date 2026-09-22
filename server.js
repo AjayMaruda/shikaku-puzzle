@@ -13,8 +13,7 @@ const io = new Server(server, { cors: { origin: "*" } });
 app.set("io", io);
 registerSocketHandlers(io);
 
-connectDB().then(() => {
-  server.listen(PORT, () => {
-    console.log("Server running on http://localhost:" + PORT);
-  });
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
+  connectDB();
 });
