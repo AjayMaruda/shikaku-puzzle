@@ -1,198 +1,243 @@
-﻿"use strict";
 const { v4: uuidv4 } = require("uuid");
 const Game = require("../models/Game");
 
-// Generate non-overlapping rectangles that tile the board
-function generateRectangles(width, height) {
-  const grid = Array.from({ length: height }, () => new Array(width).fill(null));
-  const rectangles = [];
+function generateBoard(width, height) {
+  const grid = Array.from({ length: height }, () => Array(width).fill(false));
+  const clues = [];
 
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
-      if (grid[row][col] !== null) continue;
+      if (grid[row][col]) continue;
 
-      // Try to place a rectangle starting here
-      const maxW = Math.min(3, width - col);
-      const maxH = Math.min(3, height - row);
+      const w = Math.min(Math.floor(Math.random() * 3) + 1, width - col);
+      const h = Math.min(Math.floor(Math.random() * 3) + 1, height - row);
 
-      // Pick a random width and height that fits without overlap
-      let placed = false;
-      const tries = [];
-      for (let w = 1; w <= maxW; w++) {
-        for (let h = 1; h <= maxH; h++) {
-          tries.push([w, h]);
+      let canPlace = true;
+      for (let y = row; y < row + h; y++) {
+        for (let x = col; x < col + w; x++) {
+          if (grid[y][x]) canPlace = false;
         }
       }
-      // Shuffle tries
-      for (let i = tries.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [tries[i], tries[j]] = [tries[j], tries[i]];
-      }
 
-      for (const [w, h] of tries) {
-        // Check if all cells in this rectangle are free
-        let canPlace = true;
-        for (let r = row; r < row + h && canPlace; r++) {
-          for (let c = col; c < col + w && canPlace; c++) {
-            if (grid[r][c] !== null) canPlace = false;
-          }
+      const rectWidth = canPlace ? w : 1;
+      const rectHeight = canPlace ? h : 1;
+
+      for (let y = row; y < row + rectHeight; y++) {
+        for (let x = col; x < col + rectWidth; x++) {
+          grid[y][x] = true;
         }
-        if (!canPlace) continue;
-
-        const id = uuidv4();
-        // Mark grid
-        for (let r = row; r < row + h; r++) {
-          for (let c = col; c < col + w; c++) {
-            grid[r][c] = id;
-          }
-        }
-        rectangles.push({ id, x: col, y: row, width: w, height: h, locked: false, clueValue: w * h, selected: false });
-        placed = true;
-        break;
       }
 
-      // Fallback: 1x1 if nothing fit (shouldn't happen but safe)
-      if (!placed) {
-        const id = uuidv4();
-        grid[row][col] = id;
-        rectangles.push({ id, x: col, y: row, width: 1, height: 1, locked: false, clueValue: 1, selected: false });
-      }
+      clues.push({
+        row: row + Math.floor(Math.random() * rectHeight),
+        col: col + Math.floor(Math.random() * rectWidth),
+        value: rectWidth * rectHeight,
+      });
     }
   }
 
-  return rectangles;
-}
-
-// Build clues: one clue per rectangle, placed at a random cell inside it
-function buildClues(rectangles) {
-  return rectangles.map((rect) => {
-    const row = rect.y + Math.floor(Math.random() * rect.height);
-    const col = rect.x + Math.floor(Math.random() * rect.width);
-    return { row, col, value: rect.clueValue };
-  });
+  return clues;
 }
 
 async function initBoard(width, height) {
-  const boardId = uuidv4();
-  const rectangles = generateRectangles(width, height);
-  const clues = buildClues(rectangles);
-
-  // For initial board we hide rectangles (player must place them)
-  // We store the solution rectangles but return only clues to the client
   const game = await Game.create({
-    boardId,
+    boardId: uuidv4(),
     width,
     height,
-    clues,
-    rectangles,
-    startTime: new Date()
+    clues: generateBoard(width, height),
+    rectangles: [],
+    startTime: new Date(),
   });
 
   return game;
 }
 
-async function getBoard(boardId) {
+async function placeRectangle(boardId, x, y, width, height) {
   const game = await Game.findOne({ boardId });
+
   if (!game) {
-    const err = new Error("Board not found");
-    err.status = 404;
-    throw err;
+    throw new Error("Board not found");
   }
+
+  if (x < 0 || y < 0 || x + width > game.width || y + height > game.height) {
+    throw new Error("Rectangle is out of bounds");
+  }
+
+  const overlap = game.rectangles.some(
+    (rectangle) =>
+      x < rectangle.x + rectangle.width &&
+      x + width > rectangle.x &&
+      y < rectangle.y + rectangle.height &&
+      y + height > rectangle.y,
+  );
+
+  if (overlap) {
+    throw new Error("Rectangle overlaps an existing rectangle");
+  }
+
+  const clue = game.clues.find(
+    (clue) =>
+      clue.col >= x &&
+      clue.col < x + width &&
+      clue.row >= y &&
+      clue.row < y + height,
+  );
+
+  if (!clue) {
+    throw new Error("Rectangle must contain a number");
+  }
+
+  const clueCount = game.clues.filter(
+    (clue) =>
+      clue.col >= x &&
+      clue.col < x + width &&
+      clue.row >= y &&
+      clue.row < y + height,
+  ).length;
+
+  if (clueCount !== 1) {
+    throw new Error("Rectangle must contain exactly one number");
+  }
+
+  if (width * height !== clue.value) {
+    throw new Error(`Rectangle area must be ${clue.value}`);
+  }
+
+  const rectangle = {
+    id: uuidv4(),
+    x,
+    y,
+    width,
+    height,
+    clueValue: clue.value,
+  };
+
+  game.rectangles.push(rectangle);
+  await game.save();
+
+  return rectangle;
+}
+
+async function removeRectangle(boardId, rectangleId) {
+  const game = await Game.findOne({ boardId });
+
+  if (!game) {
+    throw new Error("Board not found");
+  }
+
+  game.rectangles = game.rectangles.filter(
+    (rectangle) => rectangle.id !== rectangleId,
+  );
+
+  await game.save();
+
   return game;
-}
-
-async function generateNewRectangles(boardId) {
-  const game = await getBoard(boardId);
-  const rectangles = generateRectangles(game.width, game.height);
-  const clues = buildClues(rectangles);
-  game.rectangles = rectangles;
-  game.clues = clues;
-  game.solved = false;
-  game.selectedRectangleId = null;
-  await game.save();
-  return { rectangles, clues };
-}
-
-async function selectRectangle(boardId, rectangleId) {
-  const game = await getBoard(boardId);
-  const rect = game.rectangles.find((r) => r.id === rectangleId);
-  if (!rect) {
-    const err = new Error("Rectangle not found");
-    err.status = 404;
-    throw err;
-  }
-  if (rect.locked) {
-    const err = new Error("Rectangle is already locked");
-    err.status = 400;
-    throw err;
-  }
-  // Deselect previous
-  game.rectangles.forEach((r) => { r.selected = false; });
-  rect.selected = true;
-  game.selectedRectangleId = rectangleId;
-  await game.save();
-  return rect;
-}
-
-async function snapAndLock(boardId, rectangleId) {
-  const game = await getBoard(boardId);
-  const rect = game.rectangles.find((r) => r.id === rectangleId);
-  if (!rect) {
-    const err = new Error("Rectangle not found");
-    err.status = 404;
-    throw err;
-  }
-  rect.locked = true;
-  rect.selected = false;
-  game.selectedRectangleId = null;
-  await game.save();
-  return { rectangle: rect, boardState: game };
 }
 
 async function checkWinCondition(boardId) {
-  const game = await getBoard(boardId);
-  const allLocked = game.rectangles.every((r) => r.locked);
-  if (allLocked) {
-    game.solved = true;
-    game.endTime = new Date();
-    await game.save();
-    const elapsed = Math.floor((game.endTime - game.startTime) / 1000);
-    return { solved: true, message: "Congratulations! Puzzle solved!", elapsedSeconds: elapsed };
+  const game = await Game.findOne({ boardId });
+
+  if (!game) {
+    throw new Error("Board not found");
   }
-  const remaining = game.rectangles.filter((r) => !r.locked).length;
-  return { solved: false, message: `${remaining} rectangle(s) not yet locked.` };
+
+  const totalArea = game.rectangles.reduce(
+    (total, rectangle) => total + rectangle.width * rectangle.height,
+    0,
+  );
+
+  const solved =
+    totalArea === game.width * game.height &&
+    game.rectangles.length === game.clues.length;
+
+  if (solved) {
+    game.solved = true;
+    await game.save();
+
+    const elapsedSeconds = Math.floor(
+      (Date.now() - game.startTime.getTime()) / 1000,
+    );
+
+    return {
+      solved: true,
+      elapsedSeconds,
+      message: "Puzzle solved!",
+    };
+  }
+
+  return {
+    solved: false,
+    message: `${game.rectangles.length} / ${game.clues.length} rectangles completed.`,
+  };
 }
 
 async function resetGame(boardId) {
-  const game = await getBoard(boardId);
-  const rectangles = generateRectangles(game.width, game.height);
-  const clues = buildClues(rectangles);
-  game.rectangles = rectangles;
-  game.clues = clues;
+  const game = await Game.findOne({ boardId });
+
+  if (!game) {
+    throw new Error("Board not found");
+  }
+
+  game.clues = generateBoard(game.width, game.height);
+  game.rectangles = [];
   game.solved = false;
-  game.selectedRectangleId = null;
   game.startTime = new Date();
-  game.endTime = null;
+
   await game.save();
+
   return game;
 }
 
+async function selectRectangle(boardId, rectangleId) {
+  const game = await Game.findOne({ boardId });
+
+  if (!game) {
+    throw new Error("Board not found");
+  }
+
+  return (
+    game.rectangles.find((rectangle) => rectangle.id === rectangleId) || null
+  );
+}
+
+async function snapAndLock(boardId, rectangleId) {
+  const game = await Game.findOne({ boardId });
+
+  if (!game) {
+    throw new Error("Board not found");
+  }
+
+  const rectangle = game.rectangles.find(
+    (rectangle) => rectangle.id === rectangleId,
+  );
+
+  return {
+    rectangle: rectangle || null,
+    boardState: game,
+  };
+}
+
 async function stopTimer(boardId) {
-  const game = await getBoard(boardId);
-  const now = new Date();
-  const elapsed = Math.floor((now - game.startTime) / 1000);
-  game.endTime = now;
-  await game.save();
-  return { elapsedSeconds: elapsed };
+  const game = await Game.findOne({ boardId });
+
+  if (!game) {
+    throw new Error("Board not found");
+  }
+
+  const elapsedSeconds = Math.floor(
+    (Date.now() - game.startTime.getTime()) / 1000,
+  );
+
+  return { elapsedSeconds };
 }
 
 module.exports = {
   initBoard,
-  getBoard,
-  generateNewRectangles,
-  selectRectangle,
-  snapAndLock,
+  placeRectangle,
+  removeRectangle,
   checkWinCondition,
   resetGame,
-  stopTimer
+  selectRectangle,
+  snapAndLock,
+  stopTimer,
 };
