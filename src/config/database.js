@@ -8,17 +8,16 @@ async function connectDB() {
 
   if (!uri) {
     console.error(
-      "MongoDB connection error: No connection string found. Please set MONGO_URI or MONGODB_URI in your environment variables.",
+      "MongoDB connection error: No connection string found. Please set MONGO_URI in your environment variables.",
     );
-    process.exit(1);
+    return;
   }
 
   try {
     await mongoose.connect(uri);
-    console.log("MongoDB connected");
+    console.log("MongoDB connected successfully");
   } catch (err) {
     console.error("MongoDB connection error:", err.message);
-    process.exit(1);
   }
 }
 
